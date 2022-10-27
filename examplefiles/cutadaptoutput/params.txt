@@ -1,0 +1,2 @@
+fastqfolder,sequencingmetadatafile,outputfolder,minlength
+/Users/elizabethandruszkiewicz/GoogleDrive/UW/GitHub/NextGenNEPA_LOCAL/Input/fastq_files/run12_2,/Users/elizabethandruszkiewicz/GoogleDrive/UW/GitHub/NextGenNEPA/Input/sequencing_metadata_files/metadata-input-run12_2.csv,/Users/elizabethandruszkiewicz/GoogleDrive/UW/GitHub/NextGenNEPA_LOCAL/Output/cutadapt_output/run12_2_20221010,100
