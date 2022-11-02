@@ -38,20 +38,20 @@ minlength = 100
 
 # you should only need to do this one, but if the you get an error (command not found), use the following:
 old_path <- Sys.getenv("PATH")
-Sys.setenv(PATH = paste(old_path, "/Users/elizabethandruszkiewicz/opt/anaconda2/bin/", sep = ":"))
+Sys.setenv(PATH = paste(old_path, "/opt/homebrew/anaconda3/bin/", sep = ":"))
 
 # set working directory to "In_Progress"
-setwd("/Users/elizabethandruszkiewicz/GoogleDrive/UW/GitHub/NextGenNEPA/In_Progress")
+setwd("/Volumes/GoogleDrive/My Drive/RPKDesktop/github_repos/NextGenNEPA/In_Progress")
 #setwd(here("In_Progress"))
 
 # hard code in fastq folder to come from local hard drive NOT the github folder because the files are too big to host on Github
-fastqfolder <- paste0("/Users/elizabethandruszkiewicz/GoogleDrive/UW/GitHub/NextGenNEPA_LOCAL/Input/fastq_files","/run",run.num)
+fastqfolder <- paste0("/Users/rpk/GoogleDrive/UW/GitHub/NextGenNEPA_LOCAL/Input/fastq_files","/run",run.num)
 
 # create variable for the filepath for the metadata file
 sequencingmetadatafile <- paste0(here("Input","sequencing_metadata_files/"),"metadata-input-run",run.num, ".csv") 
 
 # hard code output folder to local hard drive NOT the github folder because the files are too big to host on Github
-outputfolder <- paste0("/Users/elizabethandruszkiewicz/GoogleDrive/UW/GitHub/NextGenNEPA_LOCAL/Output/","cutadapt_output","/run",run.num,"_",format(Sys.Date(), "%Y%m%d"))
+outputfolder <- paste0("/Users/rpk/GoogleDrive/UW/GitHub/NextGenNEPA_LOCAL/Output/","cutadapt_output","/run",run.num,"_",format(Sys.Date(), "%Y%m%d"))
 
 paramsfile <- paste0(outputfolder,"/params.txt")
 
@@ -100,6 +100,6 @@ Run the bash script via R to actually use cutadapt
 *IMPORTANT* won't work unless manually put in full file path to params.txt file.
 
 ```{bash}
-bash test.bash.sh "/Users/elizabethandruszkiewicz/GoogleDrive/UW/GitHub/NextGenNEPA_LOCAL/Output/cutadapt_output/run12_2_20221010/params.txt"
+bash test.bash.sh "/Users/rpk/GoogleDrive/UW/GitHub/NextGenNEPA_LOCAL/Output/cutadapt_output/run12_2_20221010/params.txt"
 ```
 
