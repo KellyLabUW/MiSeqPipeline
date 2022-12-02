@@ -1,0 +1,228 @@
+---
+title: "process_blast_results"
+author: "Eily Allan (a lot from Moncho)"
+date: "12/01/2022"
+output: html_document
+---
+
+This will take the output of BLAST (format 6) and parse it to something useful to assign taxonomy to hashes. General note: in this script I save a lot of intermediate variables - it could *definitely* be more streamlined, but I really think its important to look at things along the way. It is not subjective per se, but it is a lot of steps and decision that make a big impact on your annotation for all your environmental data. So, it pays to spend more time with this data. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(here)
+library(insect)
+library(tidyverse)
+library(taxonomizr)
+select <- dplyr::select # because there is a select function in another package, make sure its dyplr's select
+```
+
+## Read in BLAST file
+
+```{r read in blast files}
+
+### CHANGE TO WHERE YOUR FILE IS LOCATED
+blast_file <- "/Users/elizabethandruszkiewicz/Downloads/marver_test.txt"
+
+blast_results <- read_delim(blast_file, col_names = c("qseqid", "sseqid", "sacc", "pident", "length", "mismatch", "gapopen", "qcovus", "qstart", "qend", "sstart", "send", "evalue", "bitscore", "staxid", "qlen", "sscinames", "sseq"), delim = "\t" )
+
+# ryan blasted at 90% but I want to be more strict so I am going to remove anything less than 95% actually 
+blast_results <- blast_results %>% 
+  filter(pident > 95)
+
+```
+
+## Decide an annotation for each hash based on what it hits in BLAST 
+
+There can be multiple BLAST hits for a single hash so we need to decide how we will make the assignments if this happens. First, let's just find the hashes that only hit a single entry in BLAST. 
+
+```{r}
+
+# first lets just plot how many hashes hit how many hits
+numhitsperhash <- blast_results %>% 
+  group_by(qseqid) %>% 
+  summarize(numhits=n())
+
+# plot it as a histogram
+ggplot(numhitsperhash, aes(numhits)) +
+  geom_histogram()
+
+# now let's keep all the hashes that just had one blast hit
+singlehit <- numhitsperhash %>% 
+  filter(numhits==1)
+
+singlehitresults <- blast_results %>% 
+  filter(qseqid %in% singlehit$qseqid)
+  
+
+```
+
+
+Now let's move onto the things that hit more than one entry, but check if they all are the same taxon -- they might have different accession numbers (sacc) and taxids (staxid), but they could actually be the same species
+
+```{r}
+# first find hashes that hit more than one blast entry
+multiplehits <- numhitsperhash %>% 
+  filter(numhits > 1)
+
+# quick check and make sure those two sum -- so answer here should be 0
+nrow(multiplehits) + nrow(singlehit) - length(unique(blast_results$qseqid))
+
+# ok now simpligy the multiple hits to just qseqid and taxon (sscinames) 
+multiplehitsresults_simple <- blast_results %>% 
+  filter(qseqid %in% multiplehits$qseqid) %>% 
+  select(c(qseqid, sscinames)) %>% 
+  distinct() # remove dulplicates so if it is the same taxon, the hash should only show up once
+
+multiplehitsresults_summary <- multiplehitsresults_simple %>% 
+  group_by(qseqid) %>% 
+  summarize(numdifftaxa=n())
+
+# plot it as a histogram
+ggplot(multiplehitsresults_summary, aes(numdifftaxa)) +
+  geom_histogram()
+
+# ok lets keep the hashes that hit multiple entries but they are all the same taxon 
+multiplehits_sametaxon <- multiplehitsresults_summary %>% 
+  filter(numdifftaxa == 1)
+
+multiplehitssametaxonresults <- blast_results %>% 
+  filter(qseqid %in% multiplehits_sametaxon$qseqid) %>% 
+  group_by(qseqid, sscinames) %>% 
+  slice(1) # this will only take a single entry for each hash (we don't care which since they all are the same taxon, should be highest pident)
+
+```
+
+Ok so now we have a bunch of hashes that hit multiple entries that are not all the same species. How do we want to deal with those? Let's first check if there are any hashes that hit multiple taxa, but there is a single taxon that hits at 100%. 
+
+```{r}
+multiplehits_difftaxon_names <- multiplehitsresults_summary %>% 
+  filter(numdifftaxa > 1)
+
+multiplehits_difftaxon <- blast_results %>% 
+  filter(qseqid %in% multiplehits_difftaxon_names$qseqid) 
+
+# keep only things that are 100% identity
+multiplehits_difftaxon_100 <- multiplehits_difftaxon %>% 
+  filter(pident==100)
+
+# see if there are multiple taxa that hit at 100% 
+multiplehits_difftaxon_100_simple <- multiplehits_difftaxon_100 %>% 
+  select(c(qseqid, sscinames)) %>% 
+  distinct() %>% 
+  group_by(qseqid) %>% 
+  summarize(numtaxa100=n())
+
+# plot it as a histogram
+ggplot(multiplehits_difftaxon_100_simple, aes(numtaxa100)) +
+  geom_histogram()
+
+# keep names of things that just hit one taxon at 100%, even if the hash also has other 
+multiplehits_difftaxon_same100 <- multiplehits_difftaxon_100_simple %>% 
+  filter(numtaxa100==1)
+
+# go back and find them and keep them 
+multiplehitsdifftaxonsame100results <- blast_results %>% 
+  filter(qseqid %in% multiplehits_difftaxon_same100$qseqid) %>% 
+  filter(pident==100) %>% 
+  group_by(qseqid) %>% 
+  slice(1) # only keep one entry
+
+```
+
+Let's actually save a file here with just these three categories:
+1) hashes that only hit a single entry in blast at >95% identity 
+2) hashes that hit multiple entries in blast at 95% identity, but all of those entries were the same species
+3) hashes that hit multiple entries in blast at 95% identity, they were not all the same species, but one species hit at 100%
+
+```{r}
+# staple together those three categories 
+confident_assignments <- rbind(singlehitresults, multiplehitssametaxonresults, multiplehitsdifftaxonsame100results)
+
+# # save it - for now leave all the metadata, but probably will just take the hash and species 
+# write_csv(confident_assignments, file="/Users/elizabethandruszkiewicz/Downloads/marver_test_blast_annotations.csv")
+
+# check to see what percent of ASVs we saved annotations for - note this is ASVs, not reads! hopefully its the majority of reads
+perc_assigned <- length(unique(confident_assignments$qseqid))/length(unique(blast_results$qseqid))*100
+
+```
+
+
+## Decide an annotation for hashes that we are not super confident in 
+
+Ok we are now up to the hard part - what about things that hit multiple entries in BLAST, and those entries are different taxa, and there is nothing at 100% or there are multiple taxa that hit at 100%? 
+
+```{r}
+leftovers <- blast_results %>% 
+  filter(! qseqid %in% c(singlehitresults$qseqid, multiplehitssametaxonresults$qseqid, multiplehitsdifftaxonsame100results$qseqid))
+
+# we can use a function and some code that moncho wrote to do a last common ancestor (LCA) analysis 
+# to do this, we annoyingly need to download the full taxonomy for each thing from blast using the taxids 
+multi.taxids <- leftovers %>% 
+  distinct(staxid) %>%
+  pull()
+
+multi.taxids <- map(multi.taxids, as.numeric)
+
+# ## I CAN'T GET THIS TO RUN - GOING TO COMMENT OUT FOR NOW AND COME BACK TO IT LATER. I THINK WE CAN USE THE ONES WE ARE CONFIDENT IN AND SEE HOW MANY READS WE ARE ASSIGNING
+#
+# we also need to pull the whole taxonomy from blast... 
+# worlds.taxonomy <- insect::taxonomy() 
+# 
+# 
+# multi.taxonomy <- insect::get_lineage(multi.taxids, worlds.taxonomy) 
+# 
+# #convert to df with taxonomy
+# multi.df<- tibble (staxid = multi.taxids,
+#                          taxonomy = multi.taxonomy) %>%
+#   mutate (Kingdom = map_chr(taxonomy, ~.x["kingdom"]),
+#           Phylum = map_chr(taxonomy, ~.x["phylum"]),
+#           Class = map_chr(taxonomy, ~.x["class"]),
+#           Order = map_chr(taxonomy, ~.x["order"]),
+#           Family= map_chr(taxonomy, ~.x["family"]),
+#           Genus = map_chr(taxonomy, ~.x["genus"]),
+#           Species = map_chr(taxonomy, ~.x["species"]))
+# 
+# multi.df %>% filter(is.na(staxid))
+# multi.df$staxid <- as.character(multi.df$staxid)
+# 
+# multi.full <- multi_taxid %>% 
+#   left_join(multi.df, by= "staxid")
+# 
+# source(here("functions", "custom.lca.R"))
+# multi.lca <- custom.lca(multi.full, cutoff = 0.95)
+# 
+# # GREAT! Now we just need to store this as hash and taxonomy like we would get from the classification from insect to make it easy to merge them 
+# 
+# # but first -- split consensus into ranks
+# multi.lca <-
+#   multi.lca %>% 
+#   separate(consensus, c("kingdom", "phylum", "class", "order", "family", "genus", "species"), sep = '%') %>% 
+#   rename(representative = qseqid)
+# 
+# multi.lca[multi.lca == "NA" ] <- NA
+# multi.lca <- multi.lca %>% 
+#   mutate(taxon = coalesce(species,genus,family,order,class,phylum,kingdom))
+# multi.lca <- multi.lca[rowSums(is.na(multi.lca[ , 2:9])) != 8,] 
+# multi.lca <- multi.lca %>% 
+#   group_by (representative) %>% 
+#   nest %>% 
+#   mutate (rank = map_chr(data, ~pivot_longer(.x,cols = 1:7, names_to  = "rank", values_to ="name") %>% 
+#                            filter(name == taxon) %>% 
+#                            pull(rank))) %>% 
+#   select(representative, rank) %>% 
+#   inner_join(multi.lca)
+# multi.lca$taxID = "consensus" #we will need this column but we want to remember that this was a consensus
+# multi.lca$score = "consensus" #we will need this column but we want to remember that this was a consensus
+# 
+# 
+# blast.hashes <- multi.lca
+# saveRDS(blast.hashes, paste0(here("Output","classification_output"),"/rs/", marker,"/hashes.annotated.blast.rds"))
+# blast.hashes <- readRDS(paste0(here("Output","classification_output"),"/rs/", marker,"/hashes.annotated.blast.rds"))
+# write.csv(blast.hashes, paste0(here("Output","classification_output"),"/rs/", marker,"/hashes.annotated.blast.csv"))
+
+```
+
+
